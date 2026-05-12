@@ -1,3 +1,4 @@
+import platform
 import json
 import math
 import streamlit as st
@@ -16,7 +17,17 @@ def parse_uploaded_replay(uploaded_file):
     with open(temp_replay_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
     
-    exe_path = os.path.join(os.getcwd(), "rrrocket.exe") 
+    # --- КРОСПЛАТФОРМЕНИЙ БЛОК ---
+    if platform.system() == "Windows":
+        exe_name = "rrrocket.exe"
+    else:
+        exe_name = "rrrocket"  # Для Arch Linux та інших UNIX-систем
+        
+    exe_path = os.path.join(os.getcwd(), exe_name) 
+    
+    # Автоматично даємо права на виконання (chmod +x), якщо ми на Linux
+    if platform.system() != "Windows" and os.path.exists(exe_path):
+        os.chmod(exe_path, 0o755)
     
     result = subprocess.run(
         [exe_path, "-n", temp_replay_path],
@@ -31,7 +42,7 @@ def parse_uploaded_replay(uploaded_file):
     if result.returncode == 0:
         return json.loads(result.stdout, object_pairs_hook=keep_duplicates)
     else:
-        st.error(f"Помилка rrrocket: {result.stderr}")
+        st.error(f"Помилка парсера: {result.stderr}")
         return None
 
 st.set_page_config(page_title="RL Analytics Dashboard", layout="wide")
