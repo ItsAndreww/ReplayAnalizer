@@ -75,12 +75,21 @@ def process_match_data(data):
     ball_y_timeline = []
     ball_actor_id = None
     
-    synced_data = {name: {'x': {}, 'y': {}, 'speed': {}} for name in known_names}
+    # Оновлений словник для AI V2
+    synced_data = {name: {'x': {}, 'y': {}, 'speed': {}, 'vy': {}, 'boost': {}} for name in known_names}
     ball_synced = {'x': {}, 'y': {}, 'vx': {}, 'vy': {}}
 
-    pri_obj_id = next((i for i, o in enumerate(objects) if "Pawn:PlayerReplicationInfo" in o), None)
-    team_obj_id = next((i for i, o in enumerate(objects) if "PlayerReplicationInfo:Team" in o), None)
-    vehicle_obj_id = next((i for i, o in enumerate(objects) if "CarComponent_TA:Vehicle" in o), None)
+    # --- НАДІЙНИЙ ПОШУК (Без зависань) ---
+    def get_exact_obj_id(obj_name):
+        for i, o in enumerate(objects):
+            if obj_name in o and "Default__" not in o:
+                return i
+        return None
+
+    pri_obj_id = get_exact_obj_id("Pawn:PlayerReplicationInfo")
+    team_obj_id = get_exact_obj_id("PlayerReplicationInfo:Team")
+    vehicle_obj_id = get_exact_obj_id("CarComponent_TA:Vehicle")
+    # -------------------------------------
 
     for frame_idx, frame in enumerate(frames):
         new_actors = frame.get('new_actors', [])
@@ -92,48 +101,51 @@ def process_match_data(data):
 
         updated_actors = frame.get('updated_actors', [])
         if isinstance(updated_actors, list):
-                for update in updated_actors:
-                    actor_id = update.get('actor_id')
-                    object_id = update.get('object_id')
-                    attribute = update.get('attribute', {})
+            for update in updated_actors:
+                actor_id = update.get('actor_id')
+                object_id = update.get('object_id')
+                attribute = update.get('attribute', {})
 
-                    if "Reservation" in attribute: raw_name = attribute["Reservation"].get("name")
-                    elif "String" in attribute: raw_name = attribute["String"]
-                    else: raw_name = None
+                if "Reservation" in attribute: raw_name = attribute["Reservation"].get("name")
+                elif "String" in attribute: raw_name = attribute["String"]
+                else: raw_name = None
 
-                    if raw_name:
-                        clean_raw = str(raw_name).strip().lower()
-                        for real_name in known_names:
-                            if str(real_name).strip().lower() in clean_raw:
-                                pri_to_name[actor_id] = real_name
-                                break
+                if raw_name:
+                    clean_raw = str(raw_name).strip().lower()
+                    for real_name in known_names:
+                        if str(real_name).strip().lower() in clean_raw:
+                            pri_to_name[actor_id] = real_name
+                            break
 
-                    if object_id == pri_obj_id:
-                        pa = attribute.get('ActiveActor', {}).get('actor') or attribute.get('FlaggedInt', {}).get('int')
-                        if pa is not None: car_to_pri[actor_id] = pa
-                    elif object_id == team_obj_id:
-                        ta = attribute.get('ActiveActor', {}).get('actor')
-                        if ta is not None: pri_to_team[actor_id] = ta
-                    elif object_id == vehicle_obj_id:
-                        car_actor = attribute.get('ActiveActor', {}).get('actor') or attribute.get('FlaggedInt', {}).get('int')
-                        if car_actor is not None: comp_to_car[actor_id] = car_actor 
+                if object_id == pri_obj_id:
+                    pa = attribute.get('ActiveActor', {}).get('actor') or attribute.get('FlaggedInt', {}).get('int')
+                    if pa is not None: car_to_pri[actor_id] = pa
+                elif object_id == team_obj_id:
+                    ta = attribute.get('ActiveActor', {}).get('actor')
+                    if ta is not None: pri_to_team[actor_id] = ta
+                elif object_id == vehicle_obj_id:
+                    car_actor = attribute.get('ActiveActor', {}).get('actor') or attribute.get('FlaggedInt', {}).get('int')
+                    if car_actor is not None: comp_to_car[actor_id] = car_actor 
 
-                    boost_pct = None
-                    if "ReplicatedBoost" in attribute:
-                        b_info = attribute["ReplicatedBoost"]
-                        if isinstance(b_info, dict) and "boost_amount" in b_info:
-                            boost_pct = round((b_info["boost_amount"] / 255) * 100)
-                    elif "Byte" in attribute and object_id < len(objects) and "BoostAmount" in objects[object_id]:
-                        boost_pct = round((attribute["Byte"] / 255) * 100)
+                boost_pct = None
+                if "ReplicatedBoost" in attribute:
+                    b_info = attribute["ReplicatedBoost"]
+                    if isinstance(b_info, dict) and "boost_amount" in b_info:
+                        boost_pct = round((b_info["boost_amount"] / 255) * 100)
+                elif "Byte" in attribute and object_id < len(objects) and "BoostAmount" in objects[object_id]:
+                    boost_pct = round((attribute["Byte"] / 255) * 100)
 
-                    if boost_pct is not None:
-                        p_name = None
-                        if actor_id in comp_to_car:
-                            car_id = comp_to_car[actor_id]
-                            if car_id in car_to_pri and car_to_pri[car_id] in pri_to_name: p_name = pri_to_name[car_to_pri[car_id]]
-                        elif actor_id in car_to_pri and car_to_pri[actor_id] in pri_to_name: p_name = pri_to_name[car_to_pri[actor_id]]
+                if boost_pct is not None:
+                    p_name = None
+                    if actor_id in comp_to_car:
+                        car_id = comp_to_car[actor_id]
+                        if car_id in car_to_pri and car_to_pri[car_id] in pri_to_name: p_name = pri_to_name[car_to_pri[car_id]]
+                    elif actor_id in car_to_pri and car_to_pri[actor_id] in pri_to_name: p_name = pri_to_name[car_to_pri[actor_id]]
                     elif actor_id in pri_to_name: p_name = pri_to_name[actor_id]
-                    if p_name and p_name in player_boost_data: player_boost_data[p_name].append(boost_pct)
+                    
+                    if p_name and p_name in player_boost_data: 
+                        player_boost_data[p_name].append(boost_pct)
+                        synced_data[p_name]['boost'][frame_idx] = boost_pct # <-- Зберігаємо буст для ШІ
 
                 if 'RigidBody' in attribute and attribute['RigidBody']:
                     rb = attribute['RigidBody']
@@ -144,8 +156,6 @@ def process_match_data(data):
                             ball_y_timeline.append(loc['y'])
                             ball_synced['y'][frame_idx] = loc['y']
                         if 'x' in loc: ball_synced['x'][frame_idx] = loc['x']
-
-                    # --- НОВЕ: Ловимо вектор польоту м'яча ---
                         if 'x' in vel and 'y' in vel:
                             ball_synced['vx'][frame_idx] = vel['x']
                             ball_synced['vy'][frame_idx] = vel['y']
@@ -163,6 +173,7 @@ def process_match_data(data):
                             if 'x' in vel and 'y' in vel and 'z' in vel:
                                 sp = ((vel['x']**2 + vel['y']**2 + vel['z']**2)**0.5) * 0.036
                                 synced_data[pname]['speed'][frame_idx] = sp
+                                synced_data[pname]['vy'][frame_idx] = vel['y'] # <-- Напрямок для ШІ
 
     full_df = pd.DataFrame(index=range(len(frames)))
     if len(frames) > 0:
@@ -170,11 +181,11 @@ def process_match_data(data):
             full_df[f"{name}_x"] = pd.to_numeric(pd.Series(synced_data[name]['x']).reindex(full_df.index).ffill(), errors='coerce')
             full_df[f"{name}_y"] = pd.to_numeric(pd.Series(synced_data[name]['y']).reindex(full_df.index).ffill(), errors='coerce')
             full_df[f"{name}_speed"] = pd.to_numeric(pd.Series(synced_data[name]['speed']).reindex(full_df.index).ffill(limit=120).fillna(0), errors='coerce')
+            full_df[f"{name}_vy"] = pd.to_numeric(pd.Series(synced_data[name]['vy']).reindex(full_df.index).ffill().fillna(0), errors='coerce')
+            full_df[f"{name}_boost"] = pd.to_numeric(pd.Series(synced_data[name]['boost']).reindex(full_df.index).ffill().fillna(33), errors='coerce')
             
         full_df["ball_x"] = pd.to_numeric(pd.Series(ball_synced['x']).reindex(full_df.index).ffill(), errors='coerce')
         full_df["ball_y"] = pd.to_numeric(pd.Series(ball_synced['y']).reindex(full_df.index).ffill(), errors='coerce')
-
-        # --- НОВЕ: Закидаємо швидкості в таблицю ---
         full_df["ball_vx"] = pd.to_numeric(pd.Series(ball_synced['vx']).reindex(full_df.index).ffill(), errors='coerce')
         full_df["ball_vy"] = pd.to_numeric(pd.Series(ball_synced['vy']).reindex(full_df.index).ffill(), errors='coerce')
 
@@ -186,14 +197,7 @@ def process_match_data(data):
             last_hit_frame = -999
             for frame in hit_frames:
                 if frame - last_hit_frame > 30:
-                    hits_data.append({
-                        'Player': name, 
-                        'Ball_X': full_df.loc[frame, "ball_x"], 
-                        'Ball_Y': full_df.loc[frame, "ball_y"],
-                        'Ball_VX': full_df.loc[frame, "ball_vx"], # Зберігаємо швидкість X
-                        'Ball_VY': full_df.loc[frame, "ball_vy"], # Зберігаємо швидкість Y
-                        'Frame': frame
-                    })
+                    hits_data.append({'Player': name, 'Ball_X': full_df.loc[frame, "ball_x"], 'Ball_Y': full_df.loc[frame, "ball_y"], 'Frame': frame})
                     last_hit_frame = frame
     hits_df = pd.DataFrame(hits_data)
 
@@ -208,26 +212,13 @@ def process_match_data(data):
 
 def calculate_xg(x, y, team_color):
     target_y = 5120 if team_color == 'royalblue' else -5120
-    
-    # 1. Відкидаємо свою половину
     if (team_color == 'royalblue' and y < 0) or (team_color == 'darkorange' and y > 0):
         return 0.0
-        
-    # 2. Мертва зона бекборду (за лінією воріт)
-    if (team_color == 'royalblue' and y > 5050) or (team_color == 'darkorange' and y < -5050):
-        return 0.0
-        
     distance = math.sqrt(x**2 + (target_y - y)**2)
-    
-    # 3. Вузький "Конус удару" (Слот)
-    angle_factor = math.exp(-(abs(x) / 950)**2.5)
-    
-    # 4. Дистанція
-    dist_factor = max(0.0, 1.0 - (distance / 6000)**1.5)
-    
+    dist_factor = max(0.0, 1.0 - (distance / 4500)**1.5)
+    angle_factor = max(0.0, 1.0 - (abs(x) / 3500)**2)
     base_xg = dist_factor * angle_factor
-    
-    return max(0.00, min(0.90, base_xg))
+    return max(0.01, min(0.95, base_xg))
 
 # --- 2. ГОЛОВНИЙ ІНТЕРФЕЙС ---
 
@@ -243,15 +234,20 @@ if uploaded_file:
         if json_data:
             player_paths, player_colors, match_stats, ball_y, player_boost_data, full_df, hits_df = process_match_data(json_data)
             
-            # --- РОЗРАХУНОК xG ТА AI ФІЧЕЙ ---
+            # --- РОЗРАХУНОК xG ТА AI COACH (V2) ---
             import joblib
             try:
-                ai_coach = joblib.load('ai_coach_model.pkl')
-            except:
+                ai_coach = joblib.load('ai_coach_model_v2.pkl')
+            except Exception as e:
                 ai_coach = None
+                st.warning("⚠️ Не вдалося завантажити ai_coach_model_v2.pkl. AI-Тренер буде вимкнений.")
 
             player_all_touches_xg = {}
             if not hits_df.empty:
+                # Додаємо дефолтні колонки, щоб Pandas ніколи не крашився
+                for col in ['Nearest_Teammate', 'Nearest_Opponent', 'Is_Last_Man', 'Boost_Amount', 'Player_Speed', 'Player_VY', 'Player_Y']:
+                    hits_df[col] = 0.0
+
                 for idx, row in hits_df.iterrows():
                     p_name = row['Player']
                     p_color = player_colors.get(p_name, 'cyan')
@@ -262,31 +258,32 @@ if uploaded_file:
                         player_all_touches_xg[p_name] = []
                     player_all_touches_xg[p_name].append(hit_xg)
 
-                    # --- ДИНАМІЧНИЙ ЗБІР ДАНИХ ДЛЯ AI COACH ---
+                    # --- ЗБІР ФІЧЕЙ ДЛЯ ML (V2) ---
                     frame = row['Frame']
-                    
-                    teammate_dists, opponent_dists, teammate_y_pos = [], [], []
-                    
-                    # Беремо координати гравця в момент удару
+                    hits_df.at[idx, 'Ball_Y'] = row['Ball_Y']
+
                     if f"{p_name}_x" in full_df.columns:
                         px = full_df.loc[frame, f"{p_name}_x"]
                         py = full_df.loc[frame, f"{p_name}_y"]
-                        teammate_y_pos.append(py)
+                        
+                        hits_df.at[idx, 'Player_Y'] = py
+                        hits_df.at[idx, 'Player_Speed'] = full_df.loc[frame, f"{p_name}_speed"]
+                        hits_df.at[idx, 'Player_VY'] = full_df.loc[frame, f"{p_name}_vy"]
+                        hits_df.at[idx, 'Boost_Amount'] = full_df.loc[frame, f"{p_name}_boost"]
+
+                        teammate_dists, opponent_dists, teammate_y_pos = [], [], [py]
 
                         for other_p, other_c in player_colors.items():
                             if other_p == p_name or f"{other_p}_x" not in full_df.columns: continue
-                            
                             ox = full_df.loc[frame, f"{other_p}_x"]
                             oy = full_df.loc[frame, f"{other_p}_y"]
-                            
                             if pd.isna(ox) or pd.isna(oy): continue
                                 
                             dist = math.sqrt((ox - px)**2 + (oy - py)**2)
-                            
-                            if other_c == p_color: # Тімейт
+                            if other_c == p_color:
                                 teammate_dists.append(dist)
                                 teammate_y_pos.append(oy)
-                            else: # Суперник
+                            else:
                                 opponent_dists.append(dist)
                                 
                         hits_df.at[idx, 'Nearest_Teammate'] = min(teammate_dists) if teammate_dists else 9999
@@ -298,11 +295,18 @@ if uploaded_file:
                             elif p_color == 'darkorange' and py == max(teammate_y_pos): is_last = 1
                         hits_df.at[idx, 'Is_Last_Man'] = is_last
 
-            # Оцінюємо всі дотики через нейромережу!
-            if ai_coach is not None and not hits_df.empty and 'Nearest_Teammate' in hits_df.columns:
-                ai_features = hits_df[['Ball_Y', 'Nearest_Teammate', 'Nearest_Opponent', 'Is_Last_Man']].fillna(0)
-                hits_df['AI_Score'] = ai_coach.predict_proba(ai_features)[:, 1] * 100
+            # --- ОЦІНКА ШІ (З ЗАПОБІЖНИКОМ) ---
+            if ai_coach is not None and not hits_df.empty:
+                try:
+                    features = ['Ball_Y', 'Nearest_Teammate', 'Nearest_Opponent', 'Is_Last_Man', 'Boost_Amount', 'Player_Speed', 'Player_VY', 'Player_Y']
+                    ai_features = hits_df[features].fillna(0)
+                    hits_df['AI_Score'] = ai_coach.predict_proba(ai_features)[:, 1] * 100
+                except Exception as e:
+                    st.error(f"Помилка під час оцінки ШІ: {e}")
 
+            # ==========================================
+            # --- ОСЬ ЦЕЙ БЛОК МИ ВИПАДКОВО ЗАГУБИЛИ ---
+            # ==========================================
             player_total_xg = {}
             for p in match_stats:
                 name = p['Name']
@@ -313,6 +317,7 @@ if uploaded_file:
                     player_total_xg[name] = sum(top_touches[:allowed_shots])
                 else:
                     player_total_xg[name] = 0.0
+            # ==========================================
 
             plt.style.use('dark_background')
 
@@ -320,8 +325,9 @@ if uploaded_file:
             # 1. ТАБЛИЦЯ СТАТИСТИКИ
             # ==========================================
             st.subheader("📊 Рейтинг гравців (Rating 2.0) та xG")
+            stats_data = []
             
-            stats_data = [] # <--- Ось цей рядок ми випадково загубили
+            AVG_GOALS, AVG_ASSISTS, AVG_SAVES, AVG_SHOTS, AVG_DEMOS = 0.75, 0.60, 1.50, 3.00, 1.20
             
             for p in match_stats:
                 name = p['Name']
@@ -330,56 +336,16 @@ if uploaded_file:
                 xg_val = player_total_xg.get(name, 0.0)
                 goals, assists, saves, shots, demos = p['Goals'], p['Assists'], p['Saves'], p['Shots'], p['Demos']
                 
-                # --- АБСОЛЮТНО ТОЧНА ФОРМУЛА RATING 2.0 (З базою 6.5) ---
-                
-                # 1. Стартова оцінка для кожного гравця (як описано в офіційному гайді)
-                base_rating = 6.5 
-                
-                # 2. Очікувані середні показники ПРО-гравця за 1 гру (Averages)
-                # Саме з цими цифрами система порівнює реальний виступ
-                avg_goals = 0.7
-                avg_assists = 0.5
-                avg_saves = 1.4
-                avg_shots = 2.4
-                avg_demos = 1.2
-                
-                # 3. Відхилення від норми (Performance against averages)
-                # Якщо гравець зробив 2 сейви (при нормі 1.4), він отримує в плюс.
-                # Якщо 0 асистів (при нормі 0.5) - йде в мінус.
-                goal_impact = (goals - avg_goals) * 0.85
-                assist_impact = (assists - avg_assists) * 1.15
-                save_impact = (saves - avg_saves) * 0.65
-                shot_impact = (shots - avg_shots) * 0.15
-                demo_impact = (demos - avg_demos) * 0.2
-                
-                action_diff = goal_impact + assist_impact + save_impact + shot_impact + demo_impact
-                
-                # 4. Модифікатор Реалізації (Execution Modifier)
-                # Забив свої xG - молодець. Забив неймовірний гол (Goals > xG) - отримав бонус.
-                # Не забив 100% шанси (Goals < xG) - отримав штраф, але тепер він збалансований.
-                execution_diff = (goals - xg_val) * 0.7
-                
-                # 5. Фінальний підрахунок
-                raw_rating = base_rating + action_diff + execution_diff
-                
-                # Обмежуємо рейтинг офіційними рамками від 1.0 до 10.0
-                final_rating = max(1.0, min(10.0, raw_rating))
-                # --------------------------------------------------------
+                rating = 6
+                if goals > 0:
+                    rating += (goals * 0.8) + ((goals - xg_val) * 0.5)
+                rating += (assists - AVG_ASSISTS) * 0.5 + (saves - AVG_SAVES) * 0.3 + (shots - AVG_SHOTS) * 0.1 + (demos - AVG_DEMOS) * 0.15
+                if shots > 3 and goals == 0: rating -= 0.5
+                final_rating = max(1.0, min(10.0, rating))
 
-                stats_data.append({
-                    "Команда": team, 
-                    "Гравець": name, 
-                    "Rating 2.0": final_rating, 
-                    "xG": xg_val, 
-                    "Goals": goals, 
-                    "Assists": assists, 
-                    "Saves": saves, 
-                    "Shots": shots, 
-                    "Score": p['Score']
-                })
+                stats_data.append({"Команда": team, "Гравець": name, "Rating 2.0": final_rating, "xG": xg_val, "Goals": goals, "Assists": assists, "Saves": saves, "Shots": shots, "Score": p['Score']})
             
             df = pd.DataFrame(stats_data)
-            
             # Списки імен для заголовків
             blue_names = ", ".join(df[df["Команда"] == "Сині"]["Гравець"].tolist())
             orange_names = ", ".join(df[df["Команда"] == "Помаранчеві"]["Гравець"].tolist())
@@ -390,27 +356,30 @@ if uploaded_file:
             format_dict = {'Rating 2.0': '{:.2f}', 'xG': '{:.2f}'}
             
             col_b, col_o = st.columns(2)
+            
             with col_b:
                 st.markdown(f"### 🔵 Сині ({blue_names})")
-                styled_blue = blue_team.style.highlight_max(subset=['Rating 2.0'], color='#2e7d32').format(format_dict)
-                st.dataframe(styled_blue, use_container_width=True, hide_index=True)
+                if not blue_team.empty:
+                    styled_blue = blue_team.style.highlight_max(subset=['Rating 2.0'], color='#2e7d32').format(format_dict)
+                    st.dataframe(styled_blue, width='stretch', hide_index=True)
+                else:
+                    st.info("Гравців не знайдено")
                     
             with col_o:
                 st.markdown(f"### 🟠 Помаранчеві ({orange_names})")
-                styled_orange = orange_team.style.highlight_max(subset=['Rating 2.0'], color='#2e7d32').format(format_dict)
-                st.dataframe(styled_orange, use_container_width=True, hide_index=True)
-
+                if not orange_team.empty:
+                    styled_orange = orange_team.style.highlight_max(subset=['Rating 2.0'], color='#2e7d32').format(format_dict)
+                    st.dataframe(styled_orange, width='stretch', hide_index=True)
+                else:
+                    st.info("Гравців не знайдено")
             st.divider()
 
             # ==========================================
-            # 2. ПОЗИЦІЮВАННЯ ТА ДЕТАЛЬНА СТАТИСТИКА
+            # 2. ПОЗИЦІЮВАННЯ
             # ==========================================
             st.subheader("📍 Позиціювання відносно тімейтів")
+            teams = {"Сині": [p for p,c in player_colors.items() if c=='royalblue'], "Помаранчеві": [p for p,c in player_colors.items() if c=='darkorange']}
             
-            # --- ТУТ ОГОЛОШУЄТЬСЯ ЗМІННА TEAMS ---
-            teams = {"Сині": [p for p,c in player_colors.items() if c=='royalblue'], 
-                     "Помаранчеві": [p for p,c in player_colors.items() if c=='darkorange']}
-                     
             RATIO = 1.458392
             fig_pos, ax_pos = plt.subplots(figsize=(7, 7 / RATIO))
             fig_pos.patch.set_alpha(0.0) 
@@ -426,9 +395,9 @@ if uploaded_file:
             anchors = {'royalblue': {'x': 0, 'y': -2560}, 'darkorange': {'x': 0, 'y': 2560}}
             SCALE_FACTOR = 4.5 
             
-            # 1. МАЛЮЄМО КАРТУ ФОРМАЦІЇ
             for t_name, members in teams.items():
-                if len(members) < 1: continue
+                if len(members) < 1: continue # Тепер працює для будь-якого режиму гри!
+                    
                 color = player_colors.get(members[0], 'cyan')
                 anchor = anchors.get(color, {'x': 0, 'y': 0})
                 
@@ -460,79 +429,7 @@ if uploaded_file:
             fig_pos.tight_layout(pad=0) 
             
             col1, col2, col3 = st.columns([1, 4, 1])
-            with col2: st.pyplot(fig_pos, transparent=True, use_container_width=False)
-
-            # 2. ВИВОДИМО ДЕТАЛЬНУ ТАБЛИЦЮ (Detailed Stats)
-            st.markdown("#### 📋 Детальна статистика (Detailed Stats)")
-            
-            col_det_b, col_det_o = st.columns(2)
-            
-            for t_name, members in teams.items():
-                if not members: continue
-                    
-                sorted_members = sorted(members, key=lambda x: x.lower())
-                x_cols = [f"{n}_x" for n in sorted_members]
-                y_cols = [f"{n}_y" for n in sorted_members]
-                
-                # Відкидаємо кадри з демолішенами та без м'яча
-                t_df = full_df.dropna(subset=x_cols + y_cols + ['ball_x', 'ball_y'], how='any').copy()
-                if t_df.empty: continue
-                    
-                for n in sorted_members:
-                    t_df[f"{n}_dist"] = np.sqrt((t_df[f"{n}_x"] - t_df["ball_x"])**2 + (t_df[f"{n}_y"] - t_df["ball_y"])**2)
-                    
-                dist_cols = [f"{n}_dist" for n in sorted_members]
-                
-                t_df['closest'] = t_df[dist_cols].idxmin(axis=1).str.replace("_dist", "")
-                t_df['furthest'] = t_df[dist_cols].idxmax(axis=1).str.replace("_dist", "")
-                
-                color = player_colors.get(sorted_members[0], 'cyan')
-                
-                # --- ВИПРАВЛЕНА ЛОГІКА НАПРЯМКУ АТАКИ ---
-                if color == 'royalblue':
-                    # Сині атакують у плюс (Target Y = 5120), тому "спереду" - це максимальний Y
-                    t_df['most_forward'] = t_df[y_cols].idxmax(axis=1).str.replace("_y", "")
-                    t_df['most_back'] = t_df[y_cols].idxmin(axis=1).str.replace("_y", "")
-                else:
-                    # Помаранчеві атакують у мінус (Target Y = -5120), тому "спереду" - це мінімальний Y
-                    t_df['most_forward'] = t_df[y_cols].idxmin(axis=1).str.replace("_y", "")
-                    t_df['most_back'] = t_df[y_cols].idxmax(axis=1).str.replace("_y", "")
-                    
-                total_frames = len(t_df)
-                
-                metrics_dict = {
-                    "Показник": ["Closest to ball", "Furthest from ball", "Avg dist to ball", "Most forward", "Most back"]
-                }
-                
-                for n in sorted_members:
-                    if total_frames > 0:
-                        cl_pct = (t_df['closest'] == n).sum() / total_frames * 100
-                        fr_pct = (t_df['furthest'] == n).sum() / total_frames * 100
-                        avg_d = t_df[f"{n}_dist"].mean() / 100 
-                        fwd_pct = (t_df['most_forward'] == n).sum() / total_frames * 100
-                        bck_pct = (t_df['most_back'] == n).sum() / total_frames * 100
-                    else:
-                        cl_pct = fr_pct = avg_d = fwd_pct = bck_pct = 0
-                        
-                    metrics_dict[n] = [
-                        f"{cl_pct:.1f}%", 
-                        f"{fr_pct:.1f}%", 
-                        f"{int(avg_d)}m", 
-                        f"{fwd_pct:.1f}%", 
-                        f"{bck_pct:.1f}%"
-                    ]
-                    
-                df_det = pd.DataFrame(metrics_dict)
-                members_str = ", ".join(members)
-                
-                if color == 'royalblue':
-                    with col_det_b:
-                        st.markdown(f"##### 🔵 {t_name} ({members_str})")
-                        st.dataframe(df_det, hide_index=True, use_container_width=True)
-                else:
-                    with col_det_o:
-                        st.markdown(f"##### 🟠 {t_name} ({members_str})")
-                        st.dataframe(df_det, hide_index=True, use_container_width=True)
+            with col2: st.pyplot(fig_pos, transparent=True, width='content')
 
             st.divider()
 
@@ -566,7 +463,7 @@ if uploaded_file:
             ax_spd.bar_label(bars, fmt='%.1f', padding=4, color='white', fontweight='bold', fontsize=11)
             
             col1, col2, col3 = st.columns([1, 6, 1])
-            with col2: st.pyplot(fig_spd, transparent=True, use_container_width=False)
+            with col2: st.pyplot(fig_spd, transparent=True, width='content')
 
             st.divider()
 
@@ -631,7 +528,7 @@ if uploaded_file:
             fig_heat.tight_layout(pad=0)
             
             col1, col2, col3 = st.columns([1, 4, 1])
-            with col2: st.pyplot(fig_heat, transparent=True, use_container_width=False)
+            with col2: st.pyplot(fig_heat, transparent=True, width='content')
 
             st.divider()
 
@@ -710,12 +607,37 @@ if uploaded_file:
                     st.pyplot(fig_time, transparent=True)
 
             st.divider()
+            
+            # ==========================================
+            # 6. КАРТА УДАРІВ / xG
+            # ==========================================
+            st.subheader("🎯 Карта небезпечних моментів (xG > 0.15)")
+            if not hits_df.empty and len(hits_df[hits_df['xG'] > 0.15]) > 0:
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    fig_shots, ax_shots = plt.subplots(figsize=(5, 5 * 1.458))
+                    fig_shots.patch.set_alpha(0.0); ax_shots.patch.set_alpha(0.0)
+                    try:
+                        img = mpimg.imread('boostmap.png')
+                        img_rotated = np.rot90(img, k=1)
+                        ax_shots.imshow(img_rotated, extent=[-4096, 4096, -5972, 5972], zorder=1, alpha=0.4)
+                    except: pass
+                    
+                    for _, row in hits_df[hits_df['xG'] > 0.15].iterrows():
+                        ax_shots.scatter(row['Ball_X'], row['Ball_Y'], s=row['xG']*400, color=player_colors.get(row['Player'], 'white'), alpha=0.9, zorder=5, edgecolors='black')
+                    
+                    ax_shots.set_xlim(-4096, 4096); ax_shots.set_ylim(-5972, 5972); ax_shots.set_aspect('equal'); ax_shots.axis('off')
+                    fig_shots.tight_layout(pad=0)
+                    st.pyplot(fig_shots, transparent=True)
+            else:
+                st.info("В цьому матчі не було зафіксовано небезпечних моментів.")
 
+            st.divider()
 
             # ==========================================
-            # 7. AI COACH (ШІ-ТРЕНЕР)
+            # 7. AI COACH (ШІ-ТРЕНЕР V2)
             # ==========================================
-            st.subheader("🧠 AI Coach (Аналіз рішень на базі RLCS)")
+            st.subheader("🧠 AI Coach (Тактичний Аналіз)")
             
             if 'AI_Score' in hits_df.columns:
                 bad_plays = hits_df[hits_df['AI_Score'] < 25].sort_values('AI_Score')
@@ -723,31 +645,30 @@ if uploaded_file:
                 
                 col_ai1, col_ai2 = st.columns(2)
                 with col_ai1:
-                    st.markdown("#### 🚨 Критичні помилки (Bad Challenges)")
-                    st.caption("ШІ вважає, що лізти на м'яч у цих ситуаціях було гарантованою втратою.")
+                    st.markdown("#### 🚨 Критичні помилки")
+                    st.caption("Дабл-коміти, пустий буст або зламана ротація.")
                     if not bad_plays.empty:
                         for i, row in bad_plays.head(5).iterrows():
-                            # Форматуємо час з кадрів у секунди
                             time_sec = int(row['Frame'] / 30)
                             time_str = f"{time_sec // 60:02d}:{time_sec % 60:02d}"
                             
-                            st.error(f"⏱ **{time_str}** | **{row['Player']}** | Шанс успіху: **{row['AI_Score']:.1f}%**\n\nТімейт: {int(row['Nearest_Teammate'])} од. | Суперник: {int(row['Nearest_Opponent'])} од.")
+                            st.error(f"⏱ **{time_str}** | **{row['Player']}** | Шанс успіху: **{row['AI_Score']:.1f}%**\n\n🔋 Буст: {int(row['Boost_Amount'])}% | 🏎️ Швидкість: {int(row['Player_Speed'])}")
                     else:
-                        st.info("ШІ не знайшов критичних помилок у цьому матчі. Всі грали надійно!")
+                        st.info("ШІ не знайшов критичних помилок!")
 
                 with col_ai2:
-                    st.markdown("#### ✅ Геніальні рішення (Smart Plays)")
-                    st.caption("Ідеальний таймінг дотику при мінімальному тиску та хорошій підстраховці.")
+                    st.markdown("#### ✅ Геніальні рішення")
+                    st.caption("Ідеальний таймінг, збереження швидкості та правильна позиція.")
                     if not good_plays.empty:
                         for i, row in good_plays.head(5).iterrows():
                             time_sec = int(row['Frame'] / 30)
                             time_str = f"{time_sec // 60:02d}:{time_sec % 60:02d}"
                             
-                            st.success(f"⏱ **{time_str}** | **{row['Player']}** | Шанс успіху: **{row['AI_Score']:.1f}%**\n\nТімейт: {int(row['Nearest_Teammate'])} од. | Суперник: {int(row['Nearest_Opponent'])} од.")
+                            st.success(f"⏱ **{time_str}** | **{row['Player']}** | Шанс успіху: **{row['AI_Score']:.1f}%**\n\n🔋 Буст: {int(row['Boost_Amount'])}% | 🏎️ Швидкість: {int(row['Player_Speed'])}")
                     else:
-                        st.info("Не було зафіксовано 100% безпечних ситуацій.")
+                        st.info("Не знайдено геніальних дій.")
             else:
-                st.warning("⚠️ Файл моделі 'ai_coach_model.pkl' не знайдено. Переконайтеся, що він лежить у тій самій папці, що і скрипт.")
+                st.warning("⚠️ Файл моделі 'ai_coach_model_v2.pkl' не знайдено.")
 
 else:
     st.info("Будь ласка, завантажте файл .replay у бічній панелі для генерації повного дашборду.")
