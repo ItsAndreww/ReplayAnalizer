@@ -640,10 +640,24 @@ if uploaded_file:
             st.subheader("🧠 AI Coach (Тактичний Аналіз)")
             
             if 'AI_Score' in hits_df.columns:
-                bad_plays = hits_df[hits_df['AI_Score'] < 25].sort_values('AI_Score')
-                good_plays = hits_df[hits_df['AI_Score'] > 80].sort_values('AI_Score', ascending=False)
+                
+                # --- АНТИ-КІКОФ ФІЛЬТР (ПРО) ---
+                # Збільшуємо зону ігнорування до 1500 юнітів (15 метрів). 
+                # Це розмір центрального кола. Ігноруємо все місиво одразу після старту.
+                active_play_df = hits_df[~((hits_df['Ball_X'].abs() < 1500) & (hits_df['Ball_Y'].abs() < 1500))]
+
+                # Тепер шукаємо помилки тільки в АКТИВНІЙ грі (без кікофів)
+                bad_plays = active_play_df[active_play_df['AI_Score'] < 25].sort_values('AI_Score')
+                
+                # РОЗУМНИЙ ФІЛЬТР ДЛЯ ХАЙЛАЙТІВ (Відсікаємо моменти, де немає суперників)
+                good_plays = active_play_df[
+                    (active_play_df['AI_Score'] > 75) & 
+                    (active_play_df['Nearest_Opponent'] < 1800) &  # Має бути тиск від суперника
+                    (active_play_df['Nearest_Teammate'] > 500)     # Це не має бути випадковий дабл-коміт
+                ].sort_values('AI_Score', ascending=False)
                 
                 col_ai1, col_ai2 = st.columns(2)
+                
                 with col_ai1:
                     st.markdown("#### 🚨 Критичні помилки")
                     st.caption("Дабл-коміти, пустий буст або зламана ротація.")
@@ -652,23 +666,181 @@ if uploaded_file:
                             time_sec = int(row['Frame'] / 30)
                             time_str = f"{time_sec // 60:02d}:{time_sec % 60:02d}"
                             
-                            st.error(f"⏱ **{time_str}** | **{row['Player']}** | Шанс успіху: **{row['AI_Score']:.1f}%**\n\n🔋 Буст: {int(row['Boost_Amount'])}% | 🏎️ Швидкість: {int(row['Player_Speed'])}")
+                            # --- ГЕНЕРАТОР ПОЯСНЕНЬ (ЧОМУ ПОМИЛКА?) ---
+                            reasons = []
+                            if row['Nearest_Teammate'] < 1200: reasons.append("⚠️ Дабл-коміт (зрізав тімейта)")
+                            if row['Boost_Amount'] < 15: reasons.append("⚠️ Пішов на м'яч без бусту")
+                            if row['Player_Speed'] < 400: reasons.append("⚠️ Стояв укопаний (швидкість ~0)")
+                            if row['Is_Last_Man'] == 1: reasons.append("⚠️ Ризикував останнім у захисті")
+                            if not reasons: reasons.append("⚠️ Просто програв позицію (поганий таймінг)")
+                            
+                            reason_txt = " • ".join(reasons)
+                            
+                            st.error(f"⏱ **{time_str}** | **{row['Player']}** | Шанс: **{row['AI_Score']:.1f}%**\n\n**Чому:** {reason_txt}\n\n🔋 Буст: {int(row['Boost_Amount'])}% | 🏎️ Швидкість: {int(row['Player_Speed'])}")
                     else:
                         st.info("ШІ не знайшов критичних помилок!")
 
                 with col_ai2:
                     st.markdown("#### ✅ Геніальні рішення")
-                    st.caption("Ідеальний таймінг, збереження швидкості та правильна позиція.")
+                    st.caption("Виграні челенджі під тиском та ідеальний таймінг.")
                     if not good_plays.empty:
                         for i, row in good_plays.head(5).iterrows():
                             time_sec = int(row['Frame'] / 30)
                             time_str = f"{time_sec // 60:02d}:{time_sec % 60:02d}"
                             
-                            st.success(f"⏱ **{time_str}** | **{row['Player']}** | Шанс успіху: **{row['AI_Score']:.1f}%**\n\n🔋 Буст: {int(row['Boost_Amount'])}% | 🏎️ Швидкість: {int(row['Player_Speed'])}")
+                            # --- ГЕНЕРАТОР ПОЯСНЕНЬ (ЧОМУ УСПІХ?) ---
+                            reasons = []
+                            if row['Nearest_Opponent'] < 800: reasons.append("🔥 Виграв жорсткий 50/50")
+                            elif row['Nearest_Opponent'] < 1800: reasons.append("✅ Обіграв суперника під тиском")
+                            if row['Boost_Amount'] > 50: reasons.append("✅ Зберіг багато ресурсів")
+                            if row['Player_Speed'] > 1500: reasons.append("✅ Ідеальний імпульс (Supersonic)")
+                            if not reasons: reasons.append("✅ Дуже надійна макро-гра")
+                            
+                            reason_txt = " • ".join(reasons)
+                            
+                            st.success(f"⏱ **{time_str}** | **{row['Player']}** | Шанс: **{row['AI_Score']:.1f}%**\n\n**Чому:** {reason_txt}\n\n🔋 Буст: {int(row['Boost_Amount'])}% | 🏎️ Швидкість: {int(row['Player_Speed'])}")
                     else:
                         st.info("Не знайдено геніальних дій.")
             else:
                 st.warning("⚠️ Файл моделі 'ai_coach_model_v2.pkl' не знайдено.")
+
+            # ==========================================
+            # 8. ТАКТИЧНА ДОШКА (FREEZE-FRAME)
+            # ==========================================
+            st.divider()
+            st.subheader("🗺️ Тактична дошка (Freeze-Frame)")
+            st.caption("Позиції всіх гравців у момент дотику. Детальний візуальний та текстовий розбір від ШІ.")
+
+            analyze_options = []
+            
+            # Збираємо всі цікаві моменти в один список для вибору
+            if 'AI_Score' in hits_df.columns:
+                if 'bad_plays' in locals() and not bad_plays.empty:
+                    for idx, row in bad_plays.head(5).iterrows():
+                        time_sec = int(row['Frame'] / 30)
+                        time_str = f"{time_sec // 60:02d}:{time_sec % 60:02d}"
+                        analyze_options.append(f"🚨 Помилка | {time_str} | {row['Player']} | Frame: {row['Frame']}")
+                        
+                if 'good_plays' in locals() and not good_plays.empty:
+                    for idx, row in good_plays.head(5).iterrows():
+                        time_sec = int(row['Frame'] / 30)
+                        time_str = f"{time_sec // 60:02d}:{time_sec % 60:02d}"
+                        analyze_options.append(f"✅ Успіх | {time_str} | {row['Player']} | Frame: {row['Frame']}")
+
+            if analyze_options:
+                selected_moment = st.selectbox("Оберіть момент для розбору:", analyze_options)
+                
+                # Дістаємо кадр та ім'я гравця з обраного тексту
+                target_frame = int(selected_moment.split("Frame: ")[1])
+                target_player = selected_moment.split(" | ")[2]
+                
+                # --- НОВЕ: РОЗДІЛЯЄМО НА 2 КОЛОНКИ (ТЕКСТ + КАРТА) ---
+                col_text, col_plot = st.columns([1, 2])
+                
+                with col_text:
+                    moment_data = hits_df[(hits_df['Frame'] == target_frame) & (hits_df['Player'] == target_player)]
+                    if not moment_data.empty:
+                        row = moment_data.iloc[0]
+                        score = row['AI_Score']
+                        
+                        st.markdown(f"### 🤖 Розбір від ШІ")
+                        st.metric("Шанс успіху", f"{score:.1f}%")
+                        
+                        st.markdown("#### Що зафіксували сенсори:")
+                        st.write(f"🔋 **Буст:** {int(row['Boost_Amount'])}%")
+                        st.write(f"🏎️ **Швидкість:** {int(row['Player_Speed'])}")
+                        # ДІЛИМО НА 100 ДЛЯ ПЕРЕВОДУ В МЕТРИ
+                        st.write(f"👥 **Тімейт:** за {row['Nearest_Teammate'] / 100:.1f} м")
+                        st.write(f"⚔️ **Суперник:** за {row['Nearest_Opponent'] / 100:.1f} м")
+                        
+                        st.markdown("#### Вердикт:")
+                        reasons = []
+                        if score < 50: # ПОМИЛКА
+                            if row['Nearest_Teammate'] < 1200: reasons.append("⚠️ **Дабл-коміт:** Подивись на лінію до тімейта. Ви стрибали в один м'яч і заважали один одному.")
+                            if row['Boost_Amount'] < 15: reasons.append("⚠️ **Без ресурсів:** Ти поліз на цей м'яч майже з пустим баком бусту.")
+                            if row['Player_Speed'] < 400: reasons.append("⚠️ **Втрата імпульсу:** Ти стояв укопаний. Без швидкості неможливо виграти челендж.")
+                            if row['Is_Last_Man'] == 1: reasons.append("⚠️ **Ризик останнім:** Ти поліз на м'яч, будучи останнім гравцем у захисті. Це відкрило пусті ворота.")
+                            if not reasons: reasons.append("⚠️ **Погана позиція:** Суперник мав кращий кут, і ти не мав шансів його перебити.")
+                            
+                            for r in reasons: st.error(r)
+                            
+                        else: # УСПІХ
+                            if row['Nearest_Opponent'] < 800: reasons.append("🔥 **Жорсткий 50/50:** Суперник був впритул, але ти ідеально зіграв у корпус і виграв м'яч.")
+                            elif row['Nearest_Opponent'] < 1800: reasons.append("✅ **Крутий аутплей:** Ти обіграв суперника, який намагався тебе пресингувати.")
+                            if row['Boost_Amount'] > 50: reasons.append("✅ **Грамотний менеджмент:** Ти зробив дотик і зберіг багато бусту для наступної дії.")
+                            if row['Player_Speed'] > 1500: reasons.append("✅ **Збереження імпульсу:** Ти летів на швидкості Supersonic і зберіг ротацію.")
+                            if not reasons: reasons.append("✅ **Надійна гра:** Все зроблено за підручником.")
+                            
+                            for r in reasons: st.success(r)
+
+                with col_plot:
+                    fig_board, ax_board = plt.subplots(figsize=(6, 6 * 1.458))
+                    fig_board.patch.set_alpha(0.0)
+                    ax_board.patch.set_alpha(0.0)
+                    
+                    try:
+                        img = mpimg.imread('boostmap.png')
+                        img_rotated = np.rot90(img, k=1)
+                        ax_board.imshow(img_rotated, extent=[-4096, 4096, -5972, 5972], zorder=1, alpha=0.5)
+                    except:
+                        ax_board.add_patch(plt.Rectangle((-4096, -5120), 8192, 10240, fill=False, color='white', alpha=0.3))
+
+                    if target_frame in full_df.index:
+                        # 1. М'яч
+                        bx = full_df.loc[target_frame, "ball_x"]
+                        by = full_df.loc[target_frame, "ball_y"]
+                        if pd.notna(bx) and pd.notna(by):
+                            ax_board.scatter(bx, by, color='white', s=150, edgecolors='black', linewidth=2, zorder=10, label="М'яч")
+                            
+                        # 2. Гравці
+                        target_px, target_py = None, None
+                        target_color = player_colors.get(target_player, 'cyan')
+                        
+                        for p_name, color in player_colors.items():
+                            if f"{p_name}_x" in full_df.columns:
+                                px = full_df.loc[target_frame, f"{p_name}_x"]
+                                py = full_df.loc[target_frame, f"{p_name}_y"]
+                                
+                                if pd.notna(px) and pd.notna(py):
+                                    is_target = (p_name == target_player)
+                                    size = 450 if is_target else 150
+                                    edge_color = '#ffeb3b' if is_target else 'white'
+                                    lw = 3 if is_target else 1
+                                    alpha_val = 1.0 if is_target else 0.7
+                                    
+                                    ax_board.scatter(px, py, color=color, s=size, edgecolors=edge_color, linewidth=lw, alpha=alpha_val, zorder=8)
+                                    ax_board.text(px, py + 350, p_name, color='white', ha='center', fontsize=9, fontweight='bold', bbox=dict(boxstyle="round,pad=0.2", fc="black", alpha=0.6, ec="none"), zorder=9)
+                                    
+                                    if is_target:
+                                        target_px, target_py = px, py
+                                        
+                        # 3. Радар Дабл-Комітів та Тиску (У МЕТРАХ)
+                        if target_px is not None and target_py is not None:
+                            for p_name, color in player_colors.items():
+                                if p_name == target_player: continue
+                                if f"{p_name}_x" in full_df.columns:
+                                    px = full_df.loc[target_frame, f"{p_name}_x"]
+                                    py = full_df.loc[target_frame, f"{p_name}_y"]
+                                    
+                                    if pd.notna(px) and pd.notna(py):
+                                        dist = math.sqrt((px - target_px)**2 + (py - target_py)**2)
+                                        
+                                        if color == target_color and dist < 1500:
+                                            ax_board.plot([target_px, px], [target_py, py], color='#ff4b4b', linestyle='--', linewidth=2.5, zorder=7)
+                                            # Замінили одиниці на метри
+                                            ax_board.text((target_px + px)/2, (target_py + py)/2, f"Дабл-коміт!\n({dist / 100:.1f} м)", color='white', fontsize=8, fontweight='bold', ha='center', bbox=dict(fc="#ff4b4b", alpha=0.8, ec="none"), zorder=11)
+                                            
+                                        elif color != target_color and dist < 1800:
+                                            ax_board.plot([target_px, px], [target_py, py], color='orange', linestyle=':', linewidth=2, zorder=7)
+                                            # Замінили одиниці на метри
+                                            ax_board.text((target_px + px)/2, (target_py + py)/2, f"Тиск\n({dist / 100:.1f} м)", color='white', fontsize=7, fontweight='bold', ha='center', bbox=dict(fc="orange", alpha=0.7, ec="none"), zorder=11)
+
+                    ax_board.set_xlim(-4096, 4096)
+                    ax_board.set_ylim(-5972, 5972)
+                    ax_board.set_aspect('equal')
+                    ax_board.axis('off')
+                    
+                    st.pyplot(fig_board, transparent=True, width='stretch')
 
 else:
     st.info("Будь ласка, завантажте файл .replay у бічній панелі для генерації повного дашборду.")
