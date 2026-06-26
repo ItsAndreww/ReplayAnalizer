@@ -24,23 +24,23 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Update parser dependency
-        working-directory: './RL Replay Analysis/wasm_parser'
+        working-directory: './RLReplayAnalyzer/wasm_parser'
         run: cargo update -p boxcars
 
       - name: Build WASM
-        working-directory: './RL Replay Analysis/wasm_parser'
+        working-directory: './RLReplayAnalyzer/wasm_parser'
         run: wasm-pack build --target web
 
       - name: Copy files
         run: |
-          cp "./RL Replay Analysis/wasm_parser/pkg/wasm_parser_bg.wasm" "./RL Replay Analysis/wasm_parser_bg.wasm"
-          cp "./RL Replay Analysis/wasm_parser/pkg/wasm_parser.js" "./RL Replay Analysis/wasm_parser.js"
+          cp "./RLReplayAnalyzer/wasm_parser/pkg/wasm_parser_bg.wasm" "./RLReplayAnalyzer/wasm_parser_bg.wasm"
+          cp "./RLReplayAnalyzer/wasm_parser/pkg/wasm_parser.js" "./RLReplayAnalyzer/wasm_parser.js"
 
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "./RL Replay Analysis/wasm_parser_bg.wasm" "./RL Replay Analysis/wasm_parser.js" "./RL Replay Analysis/wasm_parser/Cargo.lock"
+          git add "./RLReplayAnalyzer/wasm_parser_bg.wasm" "./RLReplayAnalyzer/wasm_parser.js" "./RLReplayAnalyzer/wasm_parser/Cargo.lock"
           
           # Перевіряємо, чи є зміни
           if ! git diff-index --quiet HEAD; then
