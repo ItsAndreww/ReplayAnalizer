@@ -18,3 +18,9 @@ RL Replay Analysis/node_modules/
 # OS/IDE
 .vscode/
 .DS_Store
+
+# Binaries & Models
+*.exe
+*.pkl
+rrrocket
+last_page_state.txt
