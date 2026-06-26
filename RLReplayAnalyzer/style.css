@@ -792,6 +792,7 @@ select:focus { border-color: var(--accent); }
   height: 340px;
   margin: 0 auto;
   overflow: hidden;
+  border-radius: 35px;
 }
 
 .field-bg-img {
