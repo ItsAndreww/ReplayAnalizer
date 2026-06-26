@@ -812,6 +812,16 @@ select:focus { border-color: var(--accent); }
     height: 320px;
     margin-top: 10px;
     margin-bottom: 10px;
+    clip-path: polygon(
+      40px 0%, 
+      calc(100% - 40px) 0%, 
+      100% 40px, 
+      100% calc(100% - 40px), 
+      calc(100% - 40px) 100%, 
+      40px 100%, 
+      0% calc(100% - 40px), 
+      0% 40px
+    );
 }
 
 /* ================================================================
