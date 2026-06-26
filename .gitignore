@@ -10,7 +10,7 @@ ai_features_dataset_v4.csv
 
 # Rust / WebAssembly
 RL Replay Analysis/wasm_parser/target/
-RL Replay Analysis/rrrocket/target/
+RL Replay Analysis/rrrocket/
 
 # Node
 RL Replay Analysis/node_modules/
