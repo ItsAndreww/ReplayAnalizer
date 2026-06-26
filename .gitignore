@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Data & Replays
+rlcs_replays/
+*.replay
+real_match_data.json
+ai_features_dataset_v4.csv
+
+# Rust / WebAssembly
+RL Replay Analysis/wasm_parser/target/
+RL Replay Analysis/rrrocket/target/
+
+# Node
+RL Replay Analysis/node_modules/
+
+# OS/IDE
+.vscode/
+.DS_Store

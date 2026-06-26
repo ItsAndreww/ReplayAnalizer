@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RL Analytics Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js"></script>
+<link rel="preload" href="./ai_coach_v4.onnx" as="fetch" crossorigin>
+<link rel="preload" href="./wasm_parser.js" as="script" crossorigin>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="upload-screen">
+  <div class="grid-bg"></div>
+  <div class="upload-logo">Rocket League Analytics</div>
+  <div class="upload-title">RL <span>Analytics</span><br>Dashboard</div>
+  <div class="upload-sub">REPLAY ANALYSIS · AI COACH · HEATMAPS</div>
+
+  <div id="drop-zone">
+    <div class="drop-title">Завантажте Replay файл</div>
+    <div class="drop-sub">.replay · перетягни або натисни</div>
+    <button class="btn-upload" onclick="document.getElementById('file-input').click()">
+      Обрати файл
+    </button>
+    <input type="file" id="file-input" accept=".replay,.json" style="display:none">
+  </div>
+
+  <div id="parse-progress">
+    <div class="progress-label" id="progress-text">ІНІЦІАЛІЗАЦІЯ WASM...</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+  </div>
+  <div class="site-description">
+    <div class="desc-item">
+      <div class="desc-title">AI Coach (XGBoost)</div>
+      <div class="desc-text">Модель машинного навчання класифікує тактичні рішення гравців у 13 категоріях та генерує контрфактуальні прогнози для оптимізації макрогри.</div>
+    </div>
+    <div class="desc-item">
+      <div class="desc-title">Просторова аналітика</div>
+      <div class="desc-text">Генерація теплових карт переміщень, таймлайну тиску (Field Tilt) та розрахунок мікро-метрик позиціювання на полі.</div>
+    </div>
+    <div class="desc-item">
+      <div class="desc-title">Профілювання стилю</div>
+      <div class="desc-text">Агрегація статистичних показників та метрик управління бустом для формування індивідуальних радарних діаграм (Playstyle).</div>
+    </div>
+  </div>
+</div>
+
+<div id="dashboard">
+
+  <div class="topbar">
+    <div class="topbar-logo">RL·ANALYTICS</div>
+    <div class="topbar-meta">
+      <div id="replay-name" style="font-size:11px;color:#cbd5e1;font-family:'Space Mono',monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right"></div>
+      <div>
+        <span class="onnx-status">
+          <span class="status-dot" id="onnx-dot"></span>
+          <span id="onnx-label">ONNX: INIT</span>
+        </span>
+      </div>
+      <div id="match-duration">—</div>
+      <div id="match-ot-badge"></div>
+    </div>
+    <button class="btn-back" onclick="goBack()">← Новий файл</button>
+  </div>
+
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="switchTab('stats')">Статистика</div>
+    <div class="nav-tab" onclick="switchTab('heatmap')">Теплові карти</div>
+    <div class="nav-tab" onclick="switchTab('boost')">Буст & Тиск</div>
+    <div class="nav-tab" onclick="switchTab('playstyle')">Плейстайл</div>
+    <div class="nav-tab" onclick="switchTab('replay')">3D Матч</div>
+    <div class="nav-tab" onclick="switchTab('ai')">AI Coach</div>
+  </div>
+
+  <div class="main">
+    <div class="section active" id="tab-stats">
+      <div class="score-hero" id="score-hero">
+        <div class="team-block">
+          <div class="team-name">СИНІ</div>
+          <div class="team-players" id="blue-players">—</div>
+          <div class="team-goals blue" id="blue-goals">0</div>
+        </div>
+        <div class="score-divider">:</div>
+        <div class="team-block">
+          <div class="team-name">ПОМАРАНЧЕВІ</div>
+          <div class="team-players" id="orange-players">—</div>
+          <div class="team-goals orange" id="orange-goals">0</div>
+        </div>
+      </div>
+
+      <div class="metric-row" id="metric-row">
+        <div class="metric-card">
+          <div class="metric-label">Загальний час</div>
+          <div class="metric-value" id="m-time">—</div>
+          <div class="metric-sub">хвилин матч</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Дотиків м'яча</div>
+          <div class="metric-value" id="m-touches">—</div>
+          <div class="metric-sub">всього</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Найшвидший гравець</div>
+          <div class="metric-value" id="m-fastest">—</div>
+          <div class="metric-sub" id="m-fastest-name">км/год</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">xG разом</div>
+          <div class="metric-value" id="m-xg">—</div>
+          <div class="metric-sub">очікувані голи</div>
+        </div>
+      </div>
+
+      <div class="section-title">Рейтинг гравців</div>
+      <div class="stats-grid" id="stats-grid"></div>
+
+      <div class="section-title">Швидкість гравців</div>
+      <div class="chart-card" style="margin-bottom:24px">
+        <div class="chart-wrap-tall">
+          <canvas id="speed-chart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section" id="tab-heatmap">
+      <div class="controls-row">
+        <select id="heatmap-select">
+          <option value="all">Всі гравці</option>
+          <option value="blue">Команда Синіх</option>
+          <option value="orange">Команда Помаранчевих</option>
+        </select>
+        <div class="range-wrap">
+          Деталізація: <input type="range" id="heatmap-res" min="30" max="150" value="80">
+          <span id="res-val">80</span>
+        </div>
+      </div>
+      <div class="field-wrap">
+        <div class="field-card">
+          <div class="chart-card-title">ПОЗИЦІЮВАННЯ НА ПОЛІ</div>
+          <div class="field-svg-wrap">
+            <img src="field.svg" class="field-bg-img">
+            <canvas id="heatmap-canvas" class="field" width="480" height="340"></canvas>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;color:var(--muted);font-family:'Space Mono',monospace">
+            <span id="zone-left">—</span>
+            <span id="zone-mid">—</span>
+            <span id="zone-right">—</span>
+          </div>
+        </div>
+        <div class="field-card">
+          <div class="chart-card-title">ДОТИКИ М'ЯЧА</div>
+          <div class="field-svg-wrap">
+            <img src="field.svg" class="field-bg-img">
+            <canvas id="touch-canvas" class="field" width="480" height="340"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top: 32px">ПОЗИЦІЮВАННЯ ТА РОЛІ</div>
+      
+      <div class="pos-layout">
+        <div class="chart-card" style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
+          <div class="chart-card-title" style="width: 100%; text-align: left; margin-bottom: 20px;">
+            POSITION RELATIVE TO TEAMMATES
+          </div>
+          <div class="field-svg-wrap vertical-field">
+            <img src="field.svg" class="field-bg-img">
+            <canvas id="pos-canvas" class="field" width="340" height="480"></canvas>
+          </div>
+          <div id="pos-map-legend" style="width: 100%; margin-top: 20px; display: flex; flex-direction: column; gap: 12px;"></div>
+        </div>
+        
+        <div id="detailed-stats-grid" style="display: flex; flex-direction: column; gap: 20px;"></div>
+      </div>
+    </div>
+
+    <div class="section" id="tab-boost">
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-card-title">СЕРЕДНІЙ РІВЕНЬ БУСТУ (%)</div>
+          <div class="chart-wrap">
+            <canvas id="boost-avg-chart"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">ЧАС НА 0% БУСТУ</div>
+          <div class="chart-wrap">
+            <canvas id="boost-zero-chart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">FIELD TILT — ТАЙМЛАЙН ТИСКУ</div>
+        <div class="tilt-legend">
+          <span><span class="tilt-dot" style="background:rgba(249,115,22,.7)"></span>Помаранчеві тиснуть</span>
+          <span><span class="tilt-dot" style="background:rgba(59,130,246,.7)"></span>Сині тиснуть</span>
+        </div>
+        <div class="chart-wrap-tall" style="margin-top:12px">
+          <canvas id="tilt-chart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card" style="margin-top:20px">
+          <div class="chart-card-title">POSITIONING — ЧАС У ЗОНАХ</div>
+          <div id="positioning-bars" style="display:flex;flex-direction:column;gap:16px;padding-top:8px"></div>
+        </div>
+    </div>
+
+    <div class="section" id="tab-playstyle"></div>
+
+    <div class="section" id="tab-replay">
+      <div class="chart-card">
+        <div class="chart-card-title" style="text-align:center; margin-bottom: 16px;">ПОВНИЙ ЗАПИС МАТЧУ (3D ВІЗУАЛІЗАЦІЯ)</div>
+        
+        <div id="full-replay-container" style="width: 100%; height: 500px; position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #0a0e16;"></div>
+
+        <div style="text-align:center; margin-top:16px; display:flex; justify-content:center; gap:12px; align-items: center;">
+          <button class="btn-back" id="full-play-btn" onclick="toggleFullAnim()" style="padding: 8px 24px; font-size: 14px; background: var(--blue); color: white; border: none;">▶ Грати</button>
+          <select id="full-speed-select" onchange="G.fullAnimState.speed = parseFloat(this.value)" style="background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:8px 12px; border-radius:6px; outline:none; font-family:'Space Mono', monospace; font-size: 13px;">
+             <option value="0.5">0.5x Швидкість</option>
+             <option value="1" selected>1.0x Нормально</option>
+             <option value="1.5">1.5x Швидше</option>
+             <option value="2">2.0x Швидко</option>
+             <option value="4">4.0x Турбо</option>
+          </select>
+        </div>
+
+        <div style="margin-top: 24px; display: flex; align-items: center; gap: 12px; background: var(--bg2); border-radius: 8px; padding: 12px 16px; border: 1px solid var(--border);">
+           <span id="full-time-current" style="font-family: 'Space Mono', monospace; font-size: 14px; color: #fff; min-width: 45px; text-align: right;">5:00</span>
+           
+           <div style="position: relative; flex: 1; height: 30px; display: flex; align-items: center;" id="full-timeline-wrapper">
+             <input type="range" id="full-timeline" min="0" max="100" value="0" step="0.1" 
+                   style="width: 100%; position: absolute; z-index: 5; opacity: 0; cursor: pointer; height: 100%; margin: 0;" 
+                   oninput="seekFullAnim(this.value)">
+             <div style="position: absolute; width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; z-index: 1;">
+                <div id="full-timeline-progress" style="height: 100%; width: 0%; background: var(--blue); border-radius: 4px; pointer-events: none;"></div>
+             </div>
+             <div id="full-timeline-markers" style="position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 2;"></div>
+           </div>
+
+           <span id="full-time-end" style="font-family: 'Space Mono', monospace; font-size: 14px; color: var(--muted); min-width: 45px;">0:00</span>
+        </div>
+        
+        <div style="margin-top: 16px; display: flex; justify-content: center; gap: 24px; font-size: 13px; color: var(--muted); font-weight: 600;">
+           <span style="display:flex; align-items:center; gap:6px;"><span style="width:14px; height:14px; border-radius:50%; background:#22c55e;"></span> Гол</span>
+           <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:50%; background:#eab308;"></span> Удар</span>
+           <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:50%; background:#3b82f6;"></span> Сейв</span>
+           <span style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#ef4444;"></span> Демо</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" id="tab-ai">
+      <div class="ai-card">
+        <div class="section-title">Вибери момент для розбору</div>
+        <div class="ai-moment-selector" id="moment-chips"></div>
+      </div>
+
+      <div class="ai-card" id="ai-analysis" style="display:none; padding: 24px;">
+        
+        <div style="width: 100%; margin-bottom: 32px;">
+          <div class="chart-card-title" style="text-align:center; margin-bottom:16px;">АНІМАЦІЯ МОМЕНТУ</div>
+          <div id="field-anim-container" style="width: 100%; height: 500px; position: relative; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #0a0e16;"></div>
+          
+          <div style="text-align:center; margin-top:16px; display:flex; justify-content:center; gap:12px;">
+            <button class="btn-back" id="anim-play-btn" onclick="toggleAnim()" style="padding: 8px 24px; font-size: 14px;">▶ Грати</button>
+            <button class="btn-back" style="color: var(--green); border-color: rgba(34,197,94,0.5); background: rgba(34,197,94,0.1); padding: 8px 24px; font-size: 14px;" onclick="showOptimalFrame()">💡 Оптимум</button>
+          </div>
+          <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: var(--bg2); border-radius: 8px; padding: 8px 12px; border: 1px solid var(--border);">
+            <span id="anim-time-current" style="font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); min-width: 35px; text-align: right;">0:00</span>
+            
+            <input type="range" id="anim-timeline" min="0" max="100" value="0" step="0.1" 
+                  style="flex: 1; cursor: pointer; accent-color: #3b82f6; height: 4px; background: rgba(255,255,255,0.1); border-radius: 4px; outline: none; -webkit-appearance: none;" 
+                  oninput="seekAnim(this.value)">
+                  
+            <span id="anim-time-end" style="font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); min-width: 35px;">0:00</span>
+          </div>
+        </div>
+
+        <div class="ai-details" style="width: 100%;">
+          <div class="ai-verdict" id="ai-verdict-box" style="text-align:center; margin-bottom: 24px; font-size: 16px;">—</div>
+
+          <div id="ai-predict-panel" style="background:var(--bg3); padding:16px; border-radius:8px; margin-bottom:24px; text-align:left; border: 1px solid var(--border);"></div>
+
+          <div style="display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 24px;">
+            <div style="flex: 1; min-width: 300px; background: var(--bg3); padding: 16px; border-radius: 8px;">
+              <div class="section-title" style="margin-top:0;">Сенсори</div>
+              <div class="sensor-grid" id="sensor-grid"></div>
+            </div>
+
+            <div style="flex: 1; min-width: 300px; background: var(--bg3); padding: 16px; border-radius: 8px;">
+              <div class="section-title" style="margin-top:0;">Розподіл ймовірностей</div>
+              <div class="ai-stat-row" id="ai-probs" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            </div>
+          </div>
+
+          <div class="section-title" style="text-align:center;">Що сталось далі</div>
+          <div id="ai-outcome" style="padding:16px;background:var(--bg3);border-radius:8px;font-size:15px; text-align:center; margin-bottom: 12px;">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="script.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  initOnnx();
+});
+</script>
+</body>
+</html>

@@ -1,1 +1,1 @@
-https://ballchasing.com/api/replays?after=MS42ODQ4NjgzODIwMjVlKzEyX2M4MGI5YWNkLTEyNDAtNGIxNy05Njk4LTYyNmFkZjY0NTNhMA%3D%3D&min-rank=supersonic-legend&pro=true&title=rlcs
+https://ballchasing.com/api/replays?after=MS42NjA0NTE2NTVlKzEyX2E2ZDJjMjY4LTFlYjktNDMxYS1hYjAzLTc0YWE0ZjYyNGU0Mw%3D%3D&count=200&min-rank=grand-champion-2&pro=true&sort-by=replay-date&sort-dir=desc&title=RLCS

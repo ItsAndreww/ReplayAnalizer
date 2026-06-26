@@ -1,0 +1,51 @@
+name: Update Boxcars Parser and Build WASM
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # Кожного понеділка опівночі
+  workflow_dispatch: # Дозволяє запускати вручну
+
+permissions:
+  contents: write
+
+jobs:
+  update-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Update parser dependency
+        working-directory: './RL Replay Analysis/wasm_parser'
+        run: cargo update -p boxcars
+
+      - name: Build WASM
+        working-directory: './RL Replay Analysis/wasm_parser'
+        run: wasm-pack build --target web
+
+      - name: Copy files
+        run: |
+          cp "./RL Replay Analysis/wasm_parser/pkg/wasm_parser_bg.wasm" "./RL Replay Analysis/wasm_parser_bg.wasm"
+          cp "./RL Replay Analysis/wasm_parser/pkg/wasm_parser.js" "./RL Replay Analysis/wasm_parser.js"
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "./RL Replay Analysis/wasm_parser_bg.wasm" "./RL Replay Analysis/wasm_parser.js" "./RL Replay Analysis/wasm_parser/Cargo.lock"
+          
+          # Перевіряємо, чи є зміни
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "chore: auto-update boxcars parser and rebuild WASM"
+            git push
+          else
+            echo "No changes to commit"
+          fi
